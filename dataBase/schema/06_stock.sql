@@ -1,0 +1,9 @@
+-- ESTOQUE DA FÁBRICA (POR REFERÊNCIA)
+-- NÃO BLOQUEIA PEDIDO
+-- REFLEXO DA PRODUÇÃO
+
+CREATE TABLE factory_stock (
+    referencia TEXT PRIMARY KEY,
+    quantidade INT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT now()
+);
