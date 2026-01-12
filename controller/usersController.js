@@ -15,14 +15,15 @@ const { getUsersService,
     }
 }
 
-function createUserController(req, res) {
+async function createUserController(req, res) {
     try {
-        const created = createUserService(req.body);
-        res.status(201).send(created);
+        const user = await createUserService(req.body);
+        return res.status(201).json(user);
     } catch (error) {
-        res.status(422).send(err.message);
+        return res.status(400).json({ error: error.message });
     }
 }
+
 
 function updateUserController(req, res) {
     try {

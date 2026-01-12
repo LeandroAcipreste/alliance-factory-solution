@@ -1,8 +1,5 @@
 const dataBase = require("../dataBase/connection");
 
-/* ===============================
-   CRIAR PEDIDO
-================================ */
 async function createOrderService(clientId, newOrder) {
     const { items, discountPercent = 0, notes = "" } = newOrder;
 
@@ -19,7 +16,6 @@ async function createOrderService(clientId, newOrder) {
         const processedItems = [];
 
         for (const it of items) {
-            // Busca usando as colunas em INGLÊS conforme a nova price_table
             const priceResult = await client.query(
                 `
                 SELECT price, steel_lining_price, stone_price
@@ -35,7 +31,6 @@ async function createOrderService(clientId, newOrder) {
 
             const row = priceResult.rows[0];
 
-            // Cálculo do preço unitário com os nomes das colunas da tabela
             const unit_price = Number(
                 (
                     Number(row.price) +
@@ -53,8 +48,6 @@ async function createOrderService(clientId, newOrder) {
                 referencia: it.referencia.toUpperCase(),
                 tamanho: Number(it.tamanho),
                 quantidade,
-                hasForro: Boolean(it.hasForro),
-                hasPedra: Boolean(it.hasPedra),
                 unit_price,
                 total
             });
@@ -64,12 +57,14 @@ async function createOrderService(clientId, newOrder) {
         const discount = Number(((subTotal * discountPercent) / 100).toFixed(2));
         const totalFinal = Number((subTotal + shipping - discount).toFixed(2));
 
-        // Inserção na tabela de pedidos
+        /* ===============================
+           CRIA PEDIDO
+        ============================== */
         const orderInsert = await client.query(
             `
             INSERT INTO orders
             (client_id, sub_total, shipping, discount, total, status, notes)
-            VALUES ($1, $2, $3, $4, $5, 'created', $6)
+            VALUES ($1,$2,$3,$4,$5,'created',$6)
             RETURNING id
             `,
             [clientId, subTotal, shipping, discount, totalFinal, notes]
@@ -77,13 +72,15 @@ async function createOrderService(clientId, newOrder) {
 
         const orderId = orderInsert.rows[0].id;
 
-        // Inserção dos itens do pedido
+        /* ===============================
+           ITENS DO PEDIDO
+        ============================== */
         for (const item of processedItems) {
             await client.query(
                 `
                 INSERT INTO order_items
-                (order_id, referencia, tamanho, quantidade, unit_price, total, has_forro, has_pedra)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (order_id, referencia, tamanho, quantidade, unit_price, total)
+                VALUES ($1,$2,$3,$4,$5,$6)
                 `,
                 [
                     orderId,
@@ -91,9 +88,59 @@ async function createOrderService(clientId, newOrder) {
                     item.tamanho,
                     item.quantidade,
                     item.unit_price,
-                    item.total,
-                    item.hasForro,
-                    item.hasPedra
+                    item.total
+                ]
+            );
+        }
+
+        /* ===============================
+           PRODUÇÃO (nasce aqui)
+        ============================== */
+        for (const item of processedItems) {
+            await client.query(
+                `
+                INSERT INTO production_order
+                (order_id, referencia, tamanho, quantidade, checked)
+                VALUES ($1,$2,$3,$4,false)
+                `,
+                [
+                    orderId,
+                    item.referencia,
+                    item.tamanho,
+                    item.quantidade
+                ]
+            );
+        }
+
+        /* ===============================
+           FINANCEIRO (POR REFERÊNCIA)
+           fábrica recebe:
+           (item - desconto proporcional) + frete proporcional
+        ============================== */
+        for (const item of processedItems) {
+            const itemDiscount = Number(
+                ((item.total / subTotal) * discount).toFixed(2)
+            );
+
+            const itemShipping = Number(
+                ((item.total / subTotal) * shipping).toFixed(2)
+            );
+
+            const factoryAmount = Number(
+                (item.total - itemDiscount + itemShipping).toFixed(2)
+            );
+
+            await client.query(
+                `
+                INSERT INTO financial_order
+                (order_id, referencia, quantidade, factory_amount, status)
+                VALUES ($1,$2,$3,$4,'pending')
+                `,
+                [
+                    orderId,
+                    item.referencia,
+                    item.quantidade,
+                    factoryAmount
                 ]
             );
         }
@@ -105,8 +152,7 @@ async function createOrderService(clientId, newOrder) {
             subTotal,
             shipping,
             discount,
-            total: totalFinal,
-            items: processedItems
+            total: totalFinal
         };
 
     } catch (error) {
@@ -116,6 +162,7 @@ async function createOrderService(clientId, newOrder) {
         client.release();
     }
 }
+
 
 /* ===============================
    BUSCAR TODOS OS PEDIDOS

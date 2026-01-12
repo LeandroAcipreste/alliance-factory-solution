@@ -1,5 +1,11 @@
 const db = require("../dataBase/connection");
 
+
+//Validate order received.
+
+async function validateorderReceived(params) {
+    
+}
 async function payCashService(){
     const client = await db.getClient();
     try{

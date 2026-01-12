@@ -4,6 +4,7 @@ const cors = require("cors");
 const routerOrders = require("./routes/orderRoute");
 const priceTableRouter = require("./routes/priceTableRoute");
 const routerClients = require("./routes/clientRouter");
+const routerOrderStatus = require("./routes/orderStatusRouter");
 
 const app = express();
 
@@ -12,8 +13,10 @@ app.use(cors({origin: "*" }));
 
 app.use("/users", routerUsers);
 app.use("/order", routerOrders);
+app.use("/order", routerOrderStatus);
 app.use("/price-table", priceTableRouter);
 app.use("/clients", routerClients)
+
 
 
 const port = 8000;
