@@ -1,53 +1,73 @@
 const {
-    createClient,
+    createClientService,
     getAllClientsService,
-    updateClient,
-    deleteClient
+    getMyClientsService,
+    updateClientService,
+    deleteClientService
 } = require("../service/clientService");
 
+/* -----------------------------------------
+   CREATE CLIENT (VENDOR)
+----------------------------------------- */
 async function createClientController(req, res) {
     try {
-        const newClient = await createClient(req.body);
-        return res.status(201).json(newClient);
+        const client = await createClientService(req.body, req.user.id);
+        return res.status(201).json(client);
     } catch (error) {
         return res.status(400).json({ error: error.message });
     }
 }
 
-async function getAllClientsController(req, res) {
+/* -----------------------------------------
+   GET CLIENTS (ADMIN / VENDOR)
+----------------------------------------- */
+async function getClientsController(req, res) {
     try {
-        const clients = await getAllClientsService();
-        return res.status(200).json(clients);
+        const { role } = req.user;
+
+        if (role === "admin") {
+            const clients = await getAllClientsService();
+            return res.json(clients);
+        }
+
+        const clients = await getMyClientsService(req.user.id);
+        return res.json(clients);
+
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(400).json({ error: error.message });
     }
 }
 
+/* -----------------------------------------
+   UPDATE CLIENT
+----------------------------------------- */
 async function updateClientController(req, res) {
     try {
-        const { id } = req.params;
+        const client = await updateClientService(
+            req.params.id,
+            req.body,
+            req.user.id
+        );
 
-        if (isNaN(id)) {
-            return res.status(400).json({ error: "ID inválido." });
-        }
+        return res.json(client);
 
-        const updatedClient = await updateClient(id, req.body);
-        return res.status(200).json(updatedClient);
     } catch (error) {
         return res.status(400).json({ error: error.message });
     }
 }
 
+/* -----------------------------------------
+   DELETE CLIENT
+----------------------------------------- */
 async function deleteClientController(req, res) {
     try {
-        const { id } = req.params;
+        const result = await deleteClientService(
+            req.params.id,
+            req.user.id
+        );
 
-        if (isNaN(id)) {
-            return res.status(400).json({ error: "ID inválido." });
-        }
+        return res.json(result);
 
-        const result = await deleteClient(id);
-        return res.status(200).json(result);
     } catch (error) {
         return res.status(400).json({ error: error.message });
     }
@@ -55,7 +75,7 @@ async function deleteClientController(req, res) {
 
 module.exports = {
     createClientController,
-    getAllClientsController,
+    getClientsController,
     updateClientController,
     deleteClientController
 };

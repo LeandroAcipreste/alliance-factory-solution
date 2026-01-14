@@ -5,6 +5,7 @@ const routerOrders = require("./routes/orderRoute");
 const priceTableRouter = require("./routes/priceTableRoute");
 const routerClients = require("./routes/clientRouter");
 const routerOrderStatus = require("./routes/orderStatusRouter");
+const routerLogin =  require("./routes/loginRouter")
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use("/order", routerOrders);
 app.use("/order", routerOrderStatus);
 app.use("/price-table", priceTableRouter);
 app.use("/clients", routerClients)
+app.use("/login", routerLogin)
 
 
 

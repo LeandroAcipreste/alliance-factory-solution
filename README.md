@@ -44,4 +44,8 @@ O projeto segue padrões de **Clean Code** e separação de camadas para facilit
 - [ ] Dashboard de indicadores (BI) para a gestão da fábrica.
 
 ---
+<<<<<<< HEAD
 **Desenvolvido por [Leandro Acipreste](https://www.linkedin.com/in/leandroacipreste/)**
+=======
+**Desenvolvido por [Leandro Acipreste](https://www.linkedin.com/in/leandroacipreste/)**
+>>>>>>> c230e6e7b184801a63fde5f4249185e1984f5f02

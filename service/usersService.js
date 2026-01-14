@@ -1,4 +1,5 @@
 const db = require("../dataBase/connection");
+const bcrypt = require("bcryptjs"); 
 const { validateDocument } = require("../utils/documentValidation");
 
 async function createUserService(data) {
@@ -9,7 +10,6 @@ async function createUserService(data) {
         phone,
         password,
         document,
-        vendor_type,
         commission_percent
     } = data;
 
@@ -18,10 +18,13 @@ async function createUserService(data) {
     try {
         await client.query("BEGIN");
 
-        /* valida CPF ou CNPJ */
+        // CPF/CNPJ validation
         const { value: cleanDocument } = validateDocument(document);
 
-        /* busca role pelo tipo */
+        // password hash
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // search role by user_type
         const userTypeResult = await client.query(
             `SELECT name FROM user_types WHERE id = $1`,
             [user_type_id]
@@ -33,33 +36,66 @@ async function createUserService(data) {
 
         const role = userTypeResult.rows[0].name;
 
-        /* cria usuário */
-        const userResult = await client.query(
+        // Create User
+        const createUser = await client.query(
             `
             INSERT INTO users
             (user_type_id, name, email, phone, password, role, document)
             VALUES ($1,$2,$3,$4,$5,$6,$7)
             RETURNING *
             `,
-            [user_type_id, name, email, phone, password, role, cleanDocument]
+            [
+                user_type_id,
+                name,
+                email,
+                phone,
+                hashedPassword,
+                role,
+                cleanDocument
+            ]
         );
 
-        const user = userResult.rows[0];
-        const userId = user.id;
+        const user = createUser.rows[0];
 
-        /* cria vendor automaticamente se aplicável */
-        if (vendor_type && commission_percent !== undefined) {
+        //CREATE VENDOR + WALLET
+           
+
+        const vendorTypeMap = {
+            representante: "REPRESENTANTE",
+            distribuidor: "DISTRIBUIDOR",
+            vendedor_direto_fabrica: "VENDEDOR_FABRICA"
+        };
+
+        const vendorType = vendorTypeMap[role];
+
+        if (vendorType) {
+            if (commission_percent === undefined) {
+                throw new Error("commission_percent é obrigatório para vendedores");
+            }
+
+            const createVendor = await client.query(
+                `
+                INSERT INTO vendors
+                (user_id, vendor_type, commission_percent)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                `,
+                [user.id, vendorType, commission_percent]
+            );
+
+            const vendorId = createVendor.rows[0].id;
+
+            // Create wallet automatically
             await client.query(
                 `
-                INSERT INTO vendors (user_id, vendor_type, commission_percent)
-                VALUES ($1,$2,$3)
+                INSERT INTO wallets (vendor_id, debit_amount, credit_amount)
+                VALUES ($1, 0, 0)
                 `,
-                [userId, vendor_type, commission_percent]
+                [vendorId]
             );
         }
 
         await client.query("COMMIT");
-
         return user;
 
     } catch (error) {
@@ -68,9 +104,9 @@ async function createUserService(data) {
     } finally {
         client.release();
     }
-}
+};
 
-module.exports = { createUserService };
+
 
 /* ===============================
    GET ALL USERS

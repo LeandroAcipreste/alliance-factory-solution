@@ -1,134 +1,39 @@
 const db = require("../dataBase/connection");
+const { validateDocument } = require("../utils/documentValidation");
 
 /* -----------------------------------------
-   VALIDAÇÃO OFICIAL DE CPF
+   CREATE CLIENT (VENDOR)
 ----------------------------------------- */
-function validarCPF(cpf) {
-    const clean = cpf.replace(/\D/g, "");
+async function createClientService(data, loggedUserId) {
+    const { name, email, phone, document } = data;
 
-    if (clean.length !== 11) return false;
-    if (/^(\d)\1+$/.test(clean)) return false;
-
-    let soma = 0;
-    for (let i = 0; i < 9; i++) {
-        soma += parseInt(clean.charAt(i)) * (10 - i);
-    }
-
-    let resto = (soma * 10) % 11;
-    if (resto === 10) resto = 0;
-    if (resto !== parseInt(clean.charAt(9))) return false;
-
-    soma = 0;
-    for (let i = 0; i < 10; i++) {
-        soma += parseInt(clean.charAt(i)) * (11 - i);
-    }
-
-    resto = (soma * 10) % 11;
-    if (resto === 10) resto = 0;
-    if (resto !== parseInt(clean.charAt(10))) return false;
-
-    return true;
-}
-
-/* -----------------------------------------
-   VALIDAÇÃO OFICIAL DE CNPJ
------------------------------------------ */
-function validarCNPJ(cnpj) {
-    const clean = cnpj.replace(/\D/g, "");
-
-    if (clean.length !== 14) return false;
-    if (/^(\d)\1+$/.test(clean)) return false;
-
-    const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-    const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-
-    let soma = 0;
-    for (let i = 0; i < 12; i++) {
-        soma += parseInt(clean.charAt(i)) * pesos1[i];
-    }
-
-    let resto = soma % 11;
-    let dig1 = resto < 2 ? 0 : 11 - resto;
-    if (dig1 !== parseInt(clean.charAt(12))) return false;
-
-    soma = 0;
-    for (let i = 0; i < 13; i++) {
-        soma += parseInt(clean.charAt(i)) * pesos2[i];
-    }
-
-    resto = soma % 11;
-    let dig2 = resto < 2 ? 0 : 11 - resto;
-    if (dig2 !== parseInt(clean.charAt(13))) return false;
-
-    return true;
-}
-
-/* -----------------------------------------
-   VALIDAÇÃO DE DOCUMENTO
------------------------------------------ */
-function validarDocumento(document) {
-    const clean = document.replace(/\D/g, "");
-
-    if (clean.length === 11) {
-        if (!validarCPF(clean)) throw new Error("CPF inválido.");
-        return { value: clean, type: "CPF" };
-    }
-
-    if (clean.length === 14) {
-        if (!validarCNPJ(clean)) throw new Error("CNPJ inválido.");
-        return { value: clean, type: "CNPJ" };
-    }
-
-    throw new Error("Documento deve ser CPF (11) ou CNPJ (14).");
-}
-
-/* -----------------------------------------
-   CREATE CLIENT (COM TRANSACTION)
------------------------------------------ */
-async function createClient(clientData) {
     const client = await db.getClient();
 
     try {
         await client.query("BEGIN");
 
-        const { vendor_id, name, email, phone, document } = clientData;
+        const { value: cleanDocument, type: documentType } =
+            validateDocument(document);
 
-        if (!vendor_id || !name || !document) {
-            throw new Error("Vendedor, nome e documento são obrigatórios.");
-        }
-
-        const { value: documentValue, type: documentType } =
-            validarDocumento(document);
-
-        const exists = await client.query(
-            "SELECT id FROM clients WHERE document = $1 FOR UPDATE",
-            [documentValue]
+        const vendorResult = await client.query(
+            `SELECT id FROM vendors WHERE user_id = $1`,
+            [loggedUserId]
         );
 
-        if (exists.rows.length > 0) {
-            throw new Error(`${documentType} já cadastrado.`);
+        if (vendorResult.rows.length === 0) {
+            throw new Error("Usuário não é um vendedor válido");
         }
 
+        const vendorId = vendorResult.rows[0].id;
+
         const result = await client.query(
-            `INSERT INTO clients
-                (vendor_id, name, email, phone, document, document_type)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING 
-                id,
-                vendor_id,
-                name,
-                email,
-                phone,
-                document,
-                document_type`,
-            [
-                vendor_id,
-                name,
-                email || null,
-                phone || null,
-                documentValue,
-                documentType
-            ]
+            `
+            INSERT INTO clients
+            (name, email, phone, document, document_type, vendor_id, debit_open)
+            VALUES ($1,$2,$3,$4,$5,$6,0)
+            RETURNING *
+            `,
+            [name, email, phone, cleanDocument, documentType, vendorId]
         );
 
         await client.query("COMMIT");
@@ -143,65 +48,93 @@ async function createClient(clientData) {
 }
 
 /* -----------------------------------------
-   GET ALL CLIENTS (SEM TRANSACTION)
+   GET ALL CLIENTS (ADMIN)
 ----------------------------------------- */
 async function getAllClientsService() {
     const result = await db.query(
-        `SELECT 
-            id,
-            vendor_id,
-            name,
-            email,
-            phone,
-            document,
-            document_type,
-            created_at
-         FROM clients
-         ORDER BY id DESC`
+        `
+        SELECT
+            c.id,
+            c.name,
+            c.email,
+            c.phone,
+            c.document,
+            c.document_type,
+            c.debit_open,
+            c.created_at,
+            v.id AS vendor_id,
+            v.vendor_type
+        FROM clients c
+        JOIN vendors v ON v.id = c.vendor_id
+        ORDER BY c.id DESC
+        `
     );
 
     return result.rows;
 }
 
 /* -----------------------------------------
-   UPDATE CLIENT (PATCH COM TRANSACTION)
+   GET MY CLIENTS (VENDOR)
 ----------------------------------------- */
-async function updateClient(clientId, clientData) {
+async function getMyClientsService(loggedUserId) {
+    const result = await db.query(
+        `
+        SELECT
+            c.id,
+            c.name,
+            c.email,
+            c.phone,
+            c.document,
+            c.document_type,
+            c.debit_open,
+            c.created_at
+        FROM clients c
+        JOIN vendors v ON v.id = c.vendor_id
+        WHERE v.user_id = $1
+        ORDER BY c.id DESC
+        `,
+        [loggedUserId]
+    );
+
+    return result.rows;
+}
+
+/* -----------------------------------------
+   UPDATE CLIENT (VENDOR DONO)
+----------------------------------------- */
+async function updateClientService(clientId, data, loggedUserId) {
+    const { name, email, phone } = data;
+
     const client = await db.getClient();
 
     try {
         await client.query("BEGIN");
 
-        const { name, email, phone } = clientData;
-
-        if (!name && !email && !phone) {
-            throw new Error("Nenhum dado válido para atualização.");
-        }
-
         const exists = await client.query(
-            "SELECT id FROM clients WHERE id = $1 FOR UPDATE",
-            [clientId]
+            `
+            SELECT c.id
+            FROM clients c
+            JOIN vendors v ON v.id = c.vendor_id
+            WHERE c.id = $1 AND v.user_id = $2
+            FOR UPDATE
+            `,
+            [clientId, loggedUserId]
         );
 
         if (exists.rows.length === 0) {
-            throw new Error("Cliente não encontrado.");
+            throw new Error("Cliente não encontrado ou acesso negado");
         }
 
         const result = await client.query(
-            `UPDATE clients
-             SET
+            `
+            UPDATE clients
+            SET
                 name = COALESCE($1, name),
                 email = COALESCE($2, email),
                 phone = COALESCE($3, phone)
-             WHERE id = $4
-             RETURNING
-                id,
-                vendor_id,
-                name,
-                email,
-                phone,
-                document,
-                document_type`,
+            WHERE id = $4
+            RETURNING *
+            `,
             [name, email, phone, clientId]
         );
 
@@ -217,30 +150,36 @@ async function updateClient(clientId, clientData) {
 }
 
 /* -----------------------------------------
-   DELETE CLIENT (COM TRANSACTION)
+   DELETE CLIENT (VENDOR DONO)
 ----------------------------------------- */
-async function deleteClient(clientId) {
+async function deleteClientService(clientId, loggedUserId) {
     const client = await db.getClient();
 
     try {
         await client.query("BEGIN");
 
         const exists = await client.query(
-            "SELECT id FROM clients WHERE id = $1 FOR UPDATE",
-            [clientId]
+            `
+            SELECT c.id
+            FROM clients c
+            JOIN vendors v ON v.id = c.vendor_id
+            WHERE c.id = $1 AND v.user_id = $2
+            FOR UPDATE
+            `,
+            [clientId, loggedUserId]
         );
 
         if (exists.rows.length === 0) {
-            throw new Error("Cliente não encontrado.");
+            throw new Error("Cliente não encontrado ou acesso negado");
         }
 
         await client.query(
-            "DELETE FROM clients WHERE id = $1",
+            `DELETE FROM clients WHERE id = $1`,
             [clientId]
         );
 
         await client.query("COMMIT");
-        return { message: "Cliente removido com sucesso." };
+        return { message: "Cliente removido com sucesso" };
 
     } catch (error) {
         await client.query("ROLLBACK");
@@ -251,8 +190,9 @@ async function deleteClient(clientId) {
 }
 
 module.exports = {
-    createClient,
+    createClientService,
     getAllClientsService,
-    updateClient,
-    deleteClient
+    getMyClientsService,
+    updateClientService,
+    deleteClientService
 };
