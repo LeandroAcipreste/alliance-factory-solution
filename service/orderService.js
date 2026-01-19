@@ -1,6 +1,6 @@
 const dataBase = require("../dataBase/connection");
 
-async function createOrderService(clientId, newOrder) {
+async function createOrderService(clientId, newOrder, createdBy) {
     const { items, discountPercent = 0, notes = "" } = newOrder;
 
     if (!items || items.length === 0) {
@@ -63,15 +63,15 @@ async function createOrderService(clientId, newOrder) {
         const orderInsert = await client.query(
             `
             INSERT INTO orders
-            (client_id, sub_total, shipping, discount, total, status, notes)
-            VALUES ($1,$2,$3,$4,$5,'created',$6)
+            (client_id, created_by, sub_total, shipping, discount, total, status, notes)
+            VALUES ($1,$2,$3,$4,$5,$6,'created',$7)
             RETURNING id
             `,
-            [clientId, subTotal, shipping, discount, totalFinal, notes]
+            [clientId, createdBy, subTotal, shipping, discount, totalFinal, notes]
         );
+        const orderId = orderInsert.rows[0].id
 
-        const orderId = orderInsert.rows[0].id;
-
+        
         /* ===============================
            ITENS DO PEDIDO
         ============================== */
@@ -117,6 +117,22 @@ async function createOrderService(clientId, newOrder) {
            fábrica recebe:
            (item - desconto proporcional) + frete proporcional
         ============================== */
+        const financialMap = {};
+
+        for (const item of processedItems) {
+            if (!financialMap[item.referencia]) {
+                financialMap[item.referencia] = {
+                    referencia: item.referencia,
+                    quantidade: 0,
+                    total: 0
+                };
+            }
+
+            financialMap[item.referencia].quantidade += item.quantidade;
+            financialMap[item.referencia].total += item.total;
+        }
+
+
         for (const item of processedItems) {
             const itemDiscount = Number(
                 ((item.total / subTotal) * discount).toFixed(2)
@@ -148,12 +164,14 @@ async function createOrderService(clientId, newOrder) {
         await client.query("COMMIT");
 
         return {
-            orderId,
-            subTotal,
-            shipping,
-            discount,
-            total: totalFinal
-        };
+                orderId,
+                discountPercent,
+                shipping,
+                items: processedItems,
+                subTotal,
+                discount,
+                total: totalFinal
+    };
 
     } catch (error) {
         await client.query("ROLLBACK");

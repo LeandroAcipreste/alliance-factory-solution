@@ -17,7 +17,8 @@ async function createOrderController(req, res) {
             return res.status(400).send("ID do cliente inválido.");
         }
 
-        const order = await createOrderService(clientId, req.body);
+        console.log("REQ. USER NO CONTROLLER", req.user);
+        const order = await createOrderService(clientId, req.body, req.user.id);
         return res.status(201).json(order);
 
     } catch (error) {

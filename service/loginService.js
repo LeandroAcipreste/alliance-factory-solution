@@ -23,7 +23,7 @@ async function loginService({ email, password }) {
 
     const token = jwt.sign(
         { id: user.id, role: user.role },
-        process.env.JWT_SECRET || "dev_secret",
+        process.env.JWT_SECRET,
         { expiresIn: "1d" }
     );
 

@@ -14,7 +14,7 @@ const routerClients = Router();
 routerClients.use(auth)
 
 routerClients.post("/", createClientController);
-routerClients.get("/clients", authorize("admin", "vendedor_fabrica", "representante", "distribuidor")
+routerClients.get("/", authorize("admin", "vendedor_fabrica", "representante", "distribuidor")
 , getClientsController);
 routerClients.patch("/:id", updateClientController);
 routerClients.delete("/:id", deleteClientController);

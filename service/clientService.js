@@ -12,9 +12,11 @@ async function createClientService(data, loggedUserId) {
     try {
         await client.query("BEGIN");
 
+        // valida CPF/CNPJ
         const { value: cleanDocument, type: documentType } =
             validateDocument(document);
 
+        // busca o vendor do usuário logado
         const vendorResult = await client.query(
             `SELECT id FROM vendors WHERE user_id = $1`,
             [loggedUserId]
@@ -26,11 +28,12 @@ async function createClientService(data, loggedUserId) {
 
         const vendorId = vendorResult.rows[0].id;
 
+        // cria o cliente vinculado ao vendor
         const result = await client.query(
             `
             INSERT INTO clients
-            (name, email, phone, document, document_type, vendor_id, debit_open)
-            VALUES ($1,$2,$3,$4,$5,$6,0)
+            (name, email, phone, document, document_type, vendor_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             `,
             [name, email, phone, cleanDocument, documentType, vendorId]
@@ -60,7 +63,6 @@ async function getAllClientsService() {
             c.phone,
             c.document,
             c.document_type,
-            c.debit_open,
             c.created_at,
             v.id AS vendor_id,
             v.vendor_type
@@ -86,7 +88,6 @@ async function getMyClientsService(loggedUserId) {
             c.phone,
             c.document,
             c.document_type,
-            c.debit_open,
             c.created_at
         FROM clients c
         JOIN vendors v ON v.id = c.vendor_id

@@ -11,16 +11,17 @@ async function changeOrderStatusService(orderId, newStatus) {
     try {
         await client.query("BEGIN");
 
-        /* 🔹 Buscar pedido */
+        /* =====================================================
+           BUSCAR PEDIDO (lock)
+        ===================================================== */
         const orderResult = await client.query(
             `
             SELECT 
                 id,
                 status,
-                total,
-                discount,
-                shipping,
-                vendor_id
+                created_by,
+                sub_total,
+                shipping
             FROM orders
             WHERE id = $1
             FOR UPDATE
@@ -34,13 +35,15 @@ async function changeOrderStatusService(orderId, newStatus) {
 
         const order = orderResult.rows[0];
 
-        /* 🔹 Validar transição de status */
+        /* =====================================================
+           VALIDAR TRANSIÇÃO DE STATUS
+        ===================================================== */
         const transitionResult = await client.query(
             `
             SELECT 1
-            FROM order_transitions
+            FROM order_status_flow
             WHERE from_status = $1
-              AND to_status = $2
+              AND to_status   = $2
             `,
             [order.status, newStatus]
         );
@@ -49,9 +52,9 @@ async function changeOrderStatusService(orderId, newStatus) {
             throw new Error(`Transição inválida: ${order.status} → ${newStatus}`);
         }
 
-        /* ======================================================
-           PRODUÇÃO → SÓ MUDA PARA READY SE TUDO ESTIVER CHECKED
-        ====================================================== */
+        /* =====================================================
+           PRODUÇÃO → READY (todos os itens precisam estar checked)
+        ===================================================== */
         if (newStatus === "ready") {
             const pendingItems = await client.query(
                 `
@@ -68,62 +71,74 @@ async function changeOrderStatusService(orderId, newStatus) {
             }
         }
 
-        /* ======================================================
-           STATUS = SHIPPED → FINANCEIRO + CARTEIRA
-        ====================================================== */
+        /* =====================================================
+           SHIPPED → IMPACTO FINANCEIRO
+        ===================================================== */
         if (newStatus === "shipped") {
-            /* 🔹 Buscar vendedor */
+
+            /* 🔹 Buscar vendedor pelo created_by */
             const vendorResult = await client.query(
                 `
-                SELECT id, commission_percent
-                FROM vendors
-                WHERE id = $1
+                SELECT v.id, v.commission_percent
+                FROM vendors v
+                WHERE v.user_id = $1
                 `,
-                [order.vendor_id]
+                [order.created_by]
             );
 
             if (vendorResult.rows.length === 0) {
-                throw new Error("Vendedor não encontrado.");
+                throw new Error("Vendedor não encontrado para este pedido.");
             }
 
             const vendor = vendorResult.rows[0];
 
-            const orderValue = Number(order.total);
-            const discount = Number(order.discount);
-            const shipping = Number(order.shipping);
+            /* 🔹 Somar o que a fábrica tem a receber */
+            const factoryResult = await client.query(
+                `
+                SELECT COALESCE(SUM(factory_amount), 0) AS total_factory
+                FROM financial_order
+                WHERE order_id = $1
+                `,
+                [orderId]
+            );
 
-            /* 🔹 Valor da fábrica */
-            const factoryAmount =
-                (orderValue - discount) + shipping;
+            const totalFactory = Number(factoryResult.rows[0].total_factory);
 
             /* 🔹 Comissão do vendedor */
-            const vendorCommission =
-                (orderValue * vendor.commission_percent) / 100 - discount;
-
-            /* 🔹 Registro financeiro (somente fábrica) */
-            await client.query(
-                `
-                INSERT INTO financial_order
-                (order_id, factory_amount, status)
-                VALUES ($1, $2, 'pending')
-                `,
-                [orderId, factoryAmount]
-            );
+            const commission =
+                Number(order.sub_total) * (vendor.commission_percent / 100);
 
             /* 🔹 Atualizar carteira do vendedor */
             await client.query(
                 `
                 UPDATE wallets
                 SET
-                    debit = debit + $1,
-                    credit = credit + $2
+                    debit_amount  = debit_amount  + $1,
+                    credit_amount = credit_amount + $2
                 WHERE vendor_id = $3
                 `,
-                [factoryAmount, vendorCommission, vendor.id]
+                [
+                    totalFactory + Number(order.shipping),
+                    commission,
+                    vendor.id
+                ]
+            );
+
+            /* 🔹 Atualizar carteira do financeiro */
+            await client.query(
+                `
+                UPDATE wallets
+                SET
+                    credit_amount = credit_amount + $1
+                WHERE role = 'financeiro'
+                `,
+                [totalFactory]
             );
         }
 
-        /* 🔹 Atualizar status do pedido */
+        /* =====================================================
+           ATUALIZAR STATUS DO PEDIDO
+        ===================================================== */
         await client.query(
             `
             UPDATE orders

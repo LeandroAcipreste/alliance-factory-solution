@@ -5,9 +5,10 @@ async function changeOrderStatusController(req, res) {
         const { id } = req.params;
         const { status } = req.body;
 
-        const result = await changeOrderStatusService(id, status);
+        const result = await changeOrderStatusService(Number(id), status);
 
         return res.status(200).json(result);
+
     } catch (error) {
         return res.status(400).json({ error: error.message });
     }

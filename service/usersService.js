@@ -17,6 +17,7 @@ async function createUserService(data) {
 
     try {
         await client.query("BEGIN");
+        console.log("BODY:", data)
 
         // CPF/CNPJ validation
         const { value: cleanDocument } = validateDocument(document);
@@ -63,7 +64,7 @@ async function createUserService(data) {
         const vendorTypeMap = {
             representante: "REPRESENTANTE",
             distribuidor: "DISTRIBUIDOR",
-            vendedor_direto_fabrica: "VENDEDOR_FABRICA"
+            vendedor_fabrica: "VENDEDOR_FABRICA"
         };
 
         const vendorType = vendorTypeMap[role];
