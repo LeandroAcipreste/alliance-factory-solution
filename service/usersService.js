@@ -1,6 +1,30 @@
 const db = require("../dataBase/connection");
-const bcrypt = require("bcryptjs"); 
+const bcrypt = require("bcryptjs");
 const { validateDocument } = require("../utils/documentValidation");
+
+/*GUARDS*/
+
+function ensureUserTypeExists(result) {
+    if (result.rows.length === 0) {
+        throw new Error("Tipo de usuário inválido");
+    }
+}
+
+function ensureUserExists(result) {
+    if (result.rows.length === 0) {
+        throw new Error("Usuário não encontrado");
+    }
+}
+
+function ensureVendorDataProvided(isVendorType, commissionPercent) {
+    if (!isVendorType) return;
+
+    if (commissionPercent === undefined) {
+        throw new Error("commission_percent é obrigatório para vendedores");
+    }
+}
+
+/*CREATE USER*/
 
 async function createUserService(data) {
     const {
@@ -17,27 +41,31 @@ async function createUserService(data) {
 
     try {
         await client.query("BEGIN");
-        console.log("BODY:", data)
 
-        // CPF/CNPJ validation
+        /* valida documento */
         const { value: cleanDocument } = validateDocument(document);
 
-        // password hash
+        /* hash senha */
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // search role by user_type
+        /* busca user_type (fonte da verdade) */
         const userTypeResult = await client.query(
             `SELECT name FROM user_types WHERE id = $1`,
             [user_type_id]
         );
 
-        if (userTypeResult.rows.length === 0) {
-            throw new Error("Tipo de usuário inválido");
-        }
+        ensureUserTypeExists(userTypeResult);
 
-        const role = userTypeResult.rows[0].name;
+        const userTypeName = userTypeResult.rows[0].name;
 
-        // Create User
+        const isVendorType =
+            userTypeName === "representante" ||
+            userTypeName === "distribuidor" ||
+            userTypeName === "vendedor_fabrica";
+
+        ensureVendorDataProvided(isVendorType, commission_percent);
+
+        /* cria usuário */
         const createUser = await client.query(
             `
             INSERT INTO users
@@ -51,42 +79,31 @@ async function createUserService(data) {
                 email,
                 phone,
                 hashedPassword,
-                role,
+                userTypeName,   // role ESPELHA user_type.name
                 cleanDocument
             ]
         );
 
         const user = createUser.rows[0];
 
-        //CREATE VENDOR + WALLET
-           
-
-        const vendorTypeMap = {
-            representante: "REPRESENTANTE",
-            distribuidor: "DISTRIBUIDOR",
-            vendedor_fabrica: "VENDEDOR_FABRICA"
-        };
-
-        const vendorType = vendorTypeMap[role];
-
-        if (vendorType) {
-            if (commission_percent === undefined) {
-                throw new Error("commission_percent é obrigatório para vendedores");
-            }
-
+        /* cria vendor + wallet SOMENTE se o user_type mandar */
+        if (isVendorType) {
             const createVendor = await client.query(
                 `
                 INSERT INTO vendors
                 (user_id, vendor_type, commission_percent)
-                VALUES ($1, $2, $3)
+                VALUES ($1,$2,$3)
                 RETURNING id
                 `,
-                [user.id, vendorType, commission_percent]
+                [
+                    user.id,
+                    userTypeName.toUpperCase(), 
+                    commission_percent
+                ]
             );
 
             const vendorId = createVendor.rows[0].id;
 
-            // Create wallet automatically
             await client.query(
                 `
                 INSERT INTO wallets (vendor_id, debit_amount, credit_amount)
@@ -105,37 +122,31 @@ async function createUserService(data) {
     } finally {
         client.release();
     }
-};
+}
 
-
-
-/* ===============================
-   GET ALL USERS
-================================ */
+/* GET / UPDATE / DELETE */
 async function getUsersService() {
-    const result = await db.query(`
+    const result = await db.query(
+        `
         SELECT
             id,
             user_type_id,
             name,
             email,
             phone,
-            cpf,
+            document,
             role,
             created_at
         FROM users
         ORDER BY id DESC
-    `);
+        `
+    );
 
     return result.rows;
 }
 
-/* ===============================
-   UPDATE USER
-================================ */
 async function updateUserService(userId, data) {
     const { name, email, phone } = data;
-
     const client = await db.getClient();
 
     try {
@@ -146,15 +157,13 @@ async function updateUserService(userId, data) {
             [userId]
         );
 
-        if (exists.rows.length === 0) {
-            throw new Error("Usuário não encontrado");
-        }
+        ensureUserExists(exists);
 
         const updated = await client.query(
             `
             UPDATE users
             SET
-                name = COALESCE($1, name),
+                name  = COALESCE($1, name),
                 email = COALESCE($2, email),
                 phone = COALESCE($3, phone)
             WHERE id = $4
@@ -174,9 +183,6 @@ async function updateUserService(userId, data) {
     }
 }
 
-/* ===============================
-   DELETE USER
-================================ */
 async function deleteUserService(userId) {
     const client = await db.getClient();
 
@@ -188,9 +194,7 @@ async function deleteUserService(userId) {
             [userId]
         );
 
-        if (exists.rows.length === 0) {
-            throw new Error("Usuário não encontrado");
-        }
+        ensureUserExists(exists);
 
         await client.query(
             `DELETE FROM users WHERE id = $1`,

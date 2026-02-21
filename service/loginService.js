@@ -2,34 +2,65 @@ const db = require("../dataBase/connection");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-async function loginService({ email, password }) {
+/*GUARDS*/
+
+function ensureCredentialsProvided(email, password){
+    if(!email || !password){
+        throw new Error("Usuário ou senha inválidos.");
+    };
+};
+
+function ensureUserExists(result){
+    if(result.rows.lenght === 0 ){
+        throw new Error("Usuário Inválido.");
+    };
+};
+
+async function ensurePassWordIsValid(password, hash){
+    const valid = await bcrypt.compare(password, hash);
+
+    if(!valid){
+        throw new Error("Senha inválida.");
+    };
+};
+
+function ensureJwtSecrettExists(){
+    if(!process.env.JWT_SECRET){
+        throw new Error("JWT_SERCRET não configgurado.");
+    };
+};
+
+/*Execution*/
+
+async function loginService({ email, password}) {
+    ensureCredentialsProvided(email, password);
+    ensureJwtSecrettExists();
+
     const result = await db.query(
-        `SELECT id, name, email, password, role
-         FROM users
-         WHERE email = $1 AND active = true`,
+        `
+        SELECT id,name, email, password, role
+        FROM users
+        WHERE email = $1
+            AND active = true
+        `,
         [email]
     );
 
-    if (result.rows.length === 0) {
-        throw new Error("Usuário ou senha inválidos");
-    }
+    ensureUserExists(result);
 
-    const user = result.rows[0];
+    const user = user.rows[0];
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-        throw new Error("Usuário ou senha inválidos");
-    }
+    ensurePassWordIsValid(password, user.password)
 
     const token = jwt.sign(
-        { id: user.id, role: user.role },
+        {id: user.id, role: user.role},
         process.env.JWT_SECRET,
-        { expiresIn: "1d" }
+        { expiresIn:"1d"}
     );
 
-    return {
+    return{
         token,
-        user: {
+        user:{
             id: user.id,
             name: user.name,
             email: user.email,
@@ -38,4 +69,6 @@ async function loginService({ email, password }) {
     };
 }
 
-module.exports = { loginService };
+moduleexxports = {
+    loginService
+}

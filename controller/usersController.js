@@ -6,12 +6,13 @@ const { getUsersService,
     } = require("../service/usersService");
 
 
-    function getUsersController(req, res) {
+    async function getUsersController(req, res) {
     try {
-        const users = getUsersService;
-        res.send(users);
+        const users = await getUsersService();
+        return res.json(users);
     } catch (err) {
-        res.status(500).send(err.message);
+        console.error(err);
+        return res.status(500).json({ message: err.message });
     }
 }
 

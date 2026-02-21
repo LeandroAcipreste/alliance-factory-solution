@@ -1,7 +1,7 @@
 const db = require("../dataBase/connection");
 
 async function getAllPricesService(){
-    // Mudando para os nomes das colunas em inglês da sua nova tabela
+    
     const result = await db.query(
         `SELECT 
             reference, 

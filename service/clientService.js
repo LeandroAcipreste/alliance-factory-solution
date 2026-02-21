@@ -1,9 +1,22 @@
 const db = require("../dataBase/connection");
 const { validateDocument } = require("../utils/documentValidation");
 
-/* -----------------------------------------
-   CREATE CLIENT (VENDOR)
------------------------------------------ */
+/*GUARDS*/
+
+function ensureVendorExists(result) {
+    if (result.rows.length === 0) {
+        throw new Error("Usuário não é um vendedor válido");
+    }
+}
+
+function ensureClientOwnership(result) {
+    if (result.rows.length === 0) {
+        throw new Error("Cliente não encontrado ou acesso negado");
+    }
+}
+
+/*CREATE CLIENT (VENDOR)*/
+
 async function createClientService(data, loggedUserId) {
     const { name, email, phone, document } = data;
 
@@ -12,23 +25,21 @@ async function createClientService(data, loggedUserId) {
     try {
         await client.query("BEGIN");
 
-        // valida CPF/CNPJ
+        /* valida documento */
         const { value: cleanDocument, type: documentType } =
             validateDocument(document);
 
-        // busca o vendor do usuário logado
+        /* busca vendor */
         const vendorResult = await client.query(
             `SELECT id FROM vendors WHERE user_id = $1`,
             [loggedUserId]
         );
 
-        if (vendorResult.rows.length === 0) {
-            throw new Error("Usuário não é um vendedor válido");
-        }
+        ensureVendorExists(vendorResult);
 
         const vendorId = vendorResult.rows[0].id;
 
-        // cria o cliente vinculado ao vendor
+        /* cria cliente */
         const result = await client.query(
             `
             INSERT INTO clients
@@ -50,9 +61,8 @@ async function createClientService(data, loggedUserId) {
     }
 }
 
-/* -----------------------------------------
-   GET ALL CLIENTS (ADMIN)
------------------------------------------ */
+/*GET ALL CLIENTS (ADMIN)*/
+
 async function getAllClientsService() {
     const result = await db.query(
         `
@@ -75,9 +85,8 @@ async function getAllClientsService() {
     return result.rows;
 }
 
-/* -----------------------------------------
-   GET MY CLIENTS (VENDOR)
------------------------------------------ */
+/*GET MY CLIENTS (VENDOR)*/
+
 async function getMyClientsService(loggedUserId) {
     const result = await db.query(
         `
@@ -100,9 +109,8 @@ async function getMyClientsService(loggedUserId) {
     return result.rows;
 }
 
-/* -----------------------------------------
-   UPDATE CLIENT (VENDOR DONO)
------------------------------------------ */
+/*UPDATE CLIENT (VENDOR DONO)*/
+
 async function updateClientService(clientId, data, loggedUserId) {
     const { name, email, phone } = data;
 
@@ -111,26 +119,27 @@ async function updateClientService(clientId, data, loggedUserId) {
     try {
         await client.query("BEGIN");
 
+        /* lock + ownership */
         const exists = await client.query(
             `
             SELECT c.id
             FROM clients c
             JOIN vendors v ON v.id = c.vendor_id
-            WHERE c.id = $1 AND v.user_id = $2
+            WHERE c.id = $1
+              AND v.user_id = $2
             FOR UPDATE
             `,
             [clientId, loggedUserId]
         );
 
-        if (exists.rows.length === 0) {
-            throw new Error("Cliente não encontrado ou acesso negado");
-        }
+        ensureClientOwnership(exists);
 
+        /* update */
         const result = await client.query(
             `
             UPDATE clients
             SET
-                name = COALESCE($1, name),
+                name  = COALESCE($1, name),
                 email = COALESCE($2, email),
                 phone = COALESCE($3, phone)
             WHERE id = $4
@@ -150,29 +159,28 @@ async function updateClientService(clientId, data, loggedUserId) {
     }
 }
 
-/* -----------------------------------------
-   DELETE CLIENT (VENDOR DONO)
------------------------------------------ */
+/*DELETE CLIENT (VENDOR DONO)*/
+
 async function deleteClientService(clientId, loggedUserId) {
     const client = await db.getClient();
 
     try {
         await client.query("BEGIN");
 
+        /* lock + ownership */
         const exists = await client.query(
             `
             SELECT c.id
             FROM clients c
             JOIN vendors v ON v.id = c.vendor_id
-            WHERE c.id = $1 AND v.user_id = $2
+            WHERE c.id = $1
+              AND v.user_id = $2
             FOR UPDATE
             `,
             [clientId, loggedUserId]
         );
 
-        if (exists.rows.length === 0) {
-            throw new Error("Cliente não encontrado ou acesso negado");
-        }
+        ensureClientOwnership(exists);
 
         await client.query(
             `DELETE FROM clients WHERE id = $1`,

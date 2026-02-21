@@ -16,7 +16,7 @@ app.use(cors({origin: "*" }));
 
 app.use("/users", routerUsers);
 app.use("/orders", routerOrders);
-app.use("/order", routerOrderStatus);
+app.use("/orders/status", routerOrderStatus);
 app.use("/price-table", priceTableRouter);
 app.use("/clients", routerClients)
 app.use("/login", routerLogin)
